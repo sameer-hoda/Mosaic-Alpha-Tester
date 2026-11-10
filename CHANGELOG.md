@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 — onboarding reset + launcher fix
+
+- **Fixed:** `--full` onboarding reset now removes the onboarding config marker and the stale LaunchAgent, so the next launch is the real first-run journey.
+- **Fixed:** the launcher no longer falls back to `~/.mosaic/store` when `~/.nembu/store` is missing after a reset; it uses a fresh `~/.nembu/store` and shows a QR instead of hanging on a logged-out legacy session.
+- **Fixed:** the migration message no longer crashes on `$new_home…`.
+- **Release assets** rebuilt with the corrected installer and launcher.
+
 ## 1.1.1 — privacy-cleaned release
 
 - **Privacy scrub:** test fixtures, prompts and docs now use synthetic names, LIDs, phone numbers and message IDs. No real chat identifiers remain in the public tree.
