@@ -99,7 +99,7 @@ migrate_legacy() {
   if [ ! -d "$legacy_home" ]; then
     return 0
   fi
-  say "Migrating existing data from $legacy_home to $new_home…"
+  say "Migrating existing data from $legacy_home to ${new_home}..."
   local ts
   ts="$(date +%Y%m%d-%H%M%S)"
   local backup_root="$HOME/.nembu-migration-backup-$ts"
