@@ -28,8 +28,10 @@ if [ ! -d "$NEMBU_HOME" ] && [ -d "$LEGACY_HOME" ]; then
 fi
 
 STORE_DIR="${STORE_DIR:-$NEMBU_HOME/store}"
-# Legacy fallback for STORE_DIR
-if [ ! -d "$STORE_DIR" ] && [ -d "${LEGACY_HOME}/store" ]; then
+# Legacy fallback only when there is no Nembu home yet (pre-migration).
+# Once ~/.nembu exists, a missing store means a deliberate reset: use an
+# empty new store, never the old logged-out ~/.mosaic store.
+if [ ! -d "$NEMBU_HOME" ] && [ ! -d "$STORE_DIR" ] && [ -d "${LEGACY_HOME}/store" ]; then
   STORE_DIR="${LEGACY_HOME}/store"
 fi
 
@@ -54,15 +56,17 @@ if [ ! -x "$BRIDGE" ] && [ -x "$LEGACY_HOME/app/bin/mosaic" ]; then
 fi
 
 LOG="$STORE_DIR/nembu.log"
-# Fallback log for migration
-if [ ! -f "$LOG" ] && [ -f "$STORE_DIR/mosaic.log" ]; then
-  LOG="$STORE_DIR/mosaic.log"
-fi
-if [ ! -f "$LOG" ] && [ -f "${LEGACY_HOME}/store/nembu.log" ]; then
-  LOG="${LEGACY_HOME}/store/nembu.log"
-fi
-if [ ! -f "$LOG" ] && [ -f "${LEGACY_HOME}/store/mosaic.log" ]; then
-  LOG="${LEGACY_HOME}/store/mosaic.log"
+# Only use the legacy log when we are actually running from the legacy store.
+if [ "$STORE_DIR" = "${LEGACY_HOME}/store" ]; then
+  if [ ! -f "$LOG" ] && [ -f "$STORE_DIR/mosaic.log" ]; then
+    LOG="$STORE_DIR/mosaic.log"
+  fi
+  if [ ! -f "$LOG" ] && [ -f "${LEGACY_HOME}/store/nembu.log" ]; then
+    LOG="${LEGACY_HOME}/store/nembu.log"
+  fi
+  if [ ! -f "$LOG" ] && [ -f "${LEGACY_HOME}/store/mosaic.log" ]; then
+    LOG="${LEGACY_HOME}/store/mosaic.log"
+  fi
 fi
 
 LABEL="ai.nembu.bridge"

@@ -198,7 +198,11 @@ mode_full() {
   rm -rf "$STORE" "$CONFIG_DIR"
   rm -f "$ENVFILE"
   if [ "$CONFIG_DIR" != "$HOME/.nembu-config" ]; then rm -rf "$HOME/.nembu-config"; fi
-  ok "Removed store/, .env and config/. The next launch asks for the Gemini key and a QR, and shows the full first-run onboarding."
+  # Remove the stale LaunchAgent so the next start writes STORE_DIR=~/.nembu/store,
+  # not the old ~/.mosaic/store.
+  rm -f "$HOME/Library/LaunchAgents/ai.nembu.bridge.plist" \
+        "$HOME/Library/LaunchAgents/ai.mosaic.bridge.plist"
+  ok "Removed store/, .env, config/ and the stale LaunchAgent. The next launch asks for the Gemini key and a QR, and shows the full first-run onboarding."
   print_restore
 }
 
