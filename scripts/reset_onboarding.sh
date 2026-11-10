@@ -2,8 +2,9 @@
 # reset_onboarding.sh — prepare or repair a first-run onboarding test.
 #
 # Modes:
-#   --full           stop the service, back up store/ and .env, remove both.
-#                    The next launch asks for the key and a QR.
+#   --full           stop the service, back up store/, .env and config/, remove
+#                    them. The next launch asks for the key and a QR, and shows
+#                    the full first-run onboarding (including the scope screen).
 #   --pairing-only   stop the service, back up, remove the WhatsApp session,
 #                    Me-chat state, sync state and pid files. messages.db,
 #                    engine.db and .env are kept, so history and the key remain.
@@ -31,6 +32,7 @@ else
 fi
 STORE="$NEMBU_HOME/store"
 ENVFILE="$NEMBU_HOME/.env"
+CONFIG_DIR="${NEMBU_CONFIG_DIR:-$NEMBU_HOME/config}"
 BACKUPS="$NEMBU_HOME/backups"
 TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP="$BACKUPS/pre-onboarding-$TS"
@@ -46,7 +48,7 @@ usage() {
 Usage: scripts/reset_onboarding.sh <mode> --yes
 
 Modes:
-  --full           Back up store/ and .env, then remove both.
+  --full           Back up store/, .env and config/, then remove them.
   --pairing-only   Back up, then remove the WhatsApp session and sync state;
                    keep messages.db, engine.db and .env.
   --test-home      Create and print a throwaway NEMBU_HOME; live install untouched.
@@ -108,12 +110,18 @@ copy_backup() {
   else
     warn "no .env at $ENVFILE (nothing to copy)"
   fi
+  if [ -d "$CONFIG_DIR" ]; then
+    cp -pR "$CONFIG_DIR" "$BACKUP/config"
+  else
+    warn "no config/ at $CONFIG_DIR (nothing to copy)"
+  fi
 }
 
 print_restore() {
-  local have_store=0 have_env=0
+  local have_store=0 have_env=0 have_config=0
   [ -d "$BACKUP/store" ] && have_store=1
   [ -f "$BACKUP/.env" ] && have_env=1
+  [ -d "$BACKUP/config" ] && have_config=1
 
   cat <<EOF
 
@@ -136,6 +144,14 @@ EOF
 EOF
   else
     printf '  # (no .env was in this backup)\n'
+  fi
+  if [ "$have_config" -eq 1 ]; then
+    cat <<EOF
+  rm -rf "$CONFIG_DIR"
+  cp -pR "$BACKUP/config" "$CONFIG_DIR"
+EOF
+  else
+    printf '  # (no config/ was in this backup)\n'
   fi
   cat <<EOF
   "$NEMBU_HOME/bin/nembu" start
@@ -179,9 +195,10 @@ mode_full() {
   say "Backing up store/ and .env…"
   make_backup_dir
   copy_backup
-  rm -rf "$STORE"
+  rm -rf "$STORE" "$CONFIG_DIR"
   rm -f "$ENVFILE"
-  ok "Removed store/ and .env. The next launch asks for the Gemini key and a QR."
+  if [ "$CONFIG_DIR" != "$HOME/.nembu-config" ]; then rm -rf "$HOME/.nembu-config"; fi
+  ok "Removed store/, .env and config/. The next launch asks for the Gemini key and a QR, and shows the full first-run onboarding."
   print_restore
 }
 
