@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+# nembu — launcher and background service control.
+#
+#   nembu            make sure the bridge service is loaded, then open the TUI
+#   nembu start      start the background service
+#   nembu stop       stop the bridge and worker
+#   nembu status     one-shot status
+#   nembu logs       follow the bridge log
+#   nembu update     re-run the installer (keeps store/ and .env)
+#   nembu uninstall  remove the app, python and PATH line
+#
+# Quitting the TUI does not stop the service.
+
+set -euo pipefail
+
+# New env with legacy fallback
+NEMBU_HOME="${NEMBU_HOME:-${MOSAIC_HOME:-$HOME/.nembu}}"
+LEGACY_HOME="${MOSAIC_HOME:-$HOME/.mosaic}"
+
+# Migration helper: if new home missing and legacy exists, use legacy as fallback
+# for paths until installer migrates it.
+if [ ! -d "$NEMBU_HOME" ] && [ -d "$LEGACY_HOME" ]; then
+  # For read-path fallback, we still want to resolve to legacy if new missing
+  # But for launcher, we prefer new home if it exists after migration.
+  # The install.sh handles full migration with backup; here we just allow
+  # reading from legacy if new missing.
+  :
+fi
+
+STORE_DIR="${STORE_DIR:-$NEMBU_HOME/store}"
+# Legacy fallback for STORE_DIR
+if [ ! -d "$STORE_DIR" ] && [ -d "${LEGACY_HOME}/store" ]; then
+  STORE_DIR="${LEGACY_HOME}/store"
+fi
+
+NEMBU_PYTHON="${NEMBU_PYTHON:-${MOSAIC_PYTHON:-$NEMBU_HOME/python/bin/python3}}"
+PY_SCRIPTS_DIR="${PY_SCRIPTS_DIR:-$NEMBU_HOME/app}"
+export NEMBU_HOME STORE_DIR NEMBU_PYTHON PY_SCRIPTS_DIR
+# Also export legacy vars for bridge/Python that still checks them
+export MOSAIC_HOME="$NEMBU_HOME" MOSAIC_PYTHON="$NEMBU_PYTHON"
+export PATH="$NEMBU_HOME/bin:$PATH"
+
+BRIDGE="$NEMBU_HOME/app/bin/nembu"
+# Fallback to legacy binary name if new missing
+if [ ! -x "$BRIDGE" ] && [ -x "$NEMBU_HOME/app/bin/mosaic" ]; then
+  BRIDGE="$NEMBU_HOME/app/bin/mosaic"
+fi
+# Also check legacy home binary
+if [ ! -x "$BRIDGE" ] && [ -x "$LEGACY_HOME/app/bin/nembu" ]; then
+  BRIDGE="$LEGACY_HOME/app/bin/nembu"
+fi
+if [ ! -x "$BRIDGE" ] && [ -x "$LEGACY_HOME/app/bin/mosaic" ]; then
+  BRIDGE="$LEGACY_HOME/app/bin/mosaic"
+fi
+
+LOG="$STORE_DIR/nembu.log"
+# Fallback log for migration
+if [ ! -f "$LOG" ] && [ -f "$STORE_DIR/mosaic.log" ]; then
+  LOG="$STORE_DIR/mosaic.log"
+fi
+if [ ! -f "$LOG" ] && [ -f "${LEGACY_HOME}/store/nembu.log" ]; then
+  LOG="${LEGACY_HOME}/store/nembu.log"
+fi
+if [ ! -f "$LOG" ] && [ -f "${LEGACY_HOME}/store/mosaic.log" ]; then
+  LOG="${LEGACY_HOME}/store/mosaic.log"
+fi
+
+LABEL="ai.nembu.bridge"
+LEGACY_LABEL="ai.mosaic.bridge"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LEGACY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
+UNIT="$HOME/.config/systemd/user/nembu.service"
+LEGACY_UNIT="$HOME/.config/systemd/user/mosaic.service"
+OS="$(uname -s)"
+
+BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+say()  { printf "${CYAN}→${NC} %s\n" "$*"; }
+ok()   { printf "${GREEN}✓${NC} %s\n" "$*"; }
+warn() { printf "${YELLOW}!${NC} %s\n" "$*"; }
+die()  { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
+
+require_install() {
+  [ -x "$BRIDGE" ] || die "Nembu is not installed. Run: curl -fsSL https://raw.githubusercontent.com/sameer-hoda/Nembu-Alpha-Tester/main/install.sh | bash"
+  [ -x "$NEMBU_PYTHON" ] || [ -x "$MOSAIC_PYTHON" ] || die "The bundled Python is missing. Re-run the installer."
+  mkdir -p "$STORE_DIR"
+}
+
+kill_pid_file() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  local pid
+  pid="$(cat "$f" 2>/dev/null || true)"
+  if [ -n "${pid:-}" ]; then kill "$pid" 2>/dev/null || true; fi
+  rm -f "$f"
+}
+
+write_plist() {
+  mkdir -p "$HOME/Library/LaunchAgents" "$STORE_DIR"
+  cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>$BRIDGE</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NEMBU_HOME</key><string>$NEMBU_HOME</string>
+    <key>STORE_DIR</key><string>$STORE_DIR</string>
+    <key>NEMBU_PYTHON</key><string>$NEMBU_PYTHON</string>
+    <key>PY_SCRIPTS_DIR</key><string>$PY_SCRIPTS_DIR</string>
+    <key>PATH</key><string>$NEMBU_HOME/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+PLIST
+}
+
+write_unit() {
+  mkdir -p "$(dirname "$UNIT")"
+	cat > "$UNIT" <<UNIT
+[Unit]
+Description=Nembu WhatsApp assistant
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=NEMBU_HOME=%h/.nembu
+Environment=STORE_DIR=%h/.nembu/store
+Environment=NEMBU_PYTHON=%h/.nembu/python/bin/python3
+Environment=PY_SCRIPTS_DIR=%h/.nembu/app
+ExecStart=%h/.nembu/app/bin/nembu
+Restart=always
+RestartSec=5
+StandardOutput=append:%h/.nembu/store/nembu.log
+StandardError=append:%h/.nembu/store/nembu.log
+
+[Install]
+WantedBy=default.target
+UNIT
+}
+
+service_start() {
+  require_install
+  case "$OS" in
+    Darwin)
+      write_plist
+      # Clean up legacy LaunchAgent if present
+      if [ -f "$LEGACY_PLIST" ]; then
+        launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null || true
+        rm -f "$LEGACY_PLIST"
+      fi
+      if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+        launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+        for _ in 1 2 3; do
+          launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || break
+          sleep 1
+        done
+      fi
+      launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
+      launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+      if ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+        die "could not start the background service"
+      fi
+      ;;
+    Linux)
+      if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+        write_unit
+        # disable legacy
+        if [ -f "$LEGACY_UNIT" ]; then
+          systemctl --user stop mosaic.service 2>/dev/null || true
+          systemctl --user disable mosaic.service 2>/dev/null || true
+          rm -f "$LEGACY_UNIT"
+        fi
+        systemctl --user daemon-reload
+        systemctl --user enable --now nembu.service
+      else
+        if [ -f "$STORE_DIR/bridge.pid" ] && kill -0 "$(cat "$STORE_DIR/bridge.pid")" 2>/dev/null; then
+          ok "already running"
+          return 0
+        fi
+        nohup "$BRIDGE" >>"$LOG" 2>&1 &
+        echo $! > "$STORE_DIR/bridge.pid"
+      fi
+      ;;
+    *)
+      die "Unsupported OS: $OS"
+      ;;
+  esac
+}
+
+service_stop() {
+  case "$OS" in
+    Darwin)
+      launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+      launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null || true
+      rm -f "$PLIST" "$LEGACY_PLIST"
+      ;;
+    Linux)
+      if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+        systemctl --user stop nembu.service 2>/dev/null || true
+        systemctl --user disable nembu.service 2>/dev/null || true
+        systemctl --user stop mosaic.service 2>/dev/null || true
+        systemctl --user disable mosaic.service 2>/dev/null || true
+      fi
+      ;;
+  esac
+  kill_pid_file "$STORE_DIR/worker.pid"
+  kill_pid_file "$STORE_DIR/bridge.pid"
+  # also try legacy store locations
+  kill_pid_file "$LEGACY_HOME/store/worker.pid"
+  kill_pid_file "$LEGACY_HOME/store/bridge.pid"
+}
+
+status() {
+  require_install
+  "$NEMBU_PYTHON" - <<'PY'
+import datetime, json, os, sqlite3, urllib.request
+store = os.environ.get("STORE_DIR", "")
+# fallback to legacy store if needed
+if not os.path.exists(os.path.join(store, "bridge_token")):
+    legacy = os.getenv("MOSAIC_HOME") or os.path.expanduser("~/.mosaic")
+    alt = os.path.join(legacy, "store")
+    if os.path.exists(os.path.join(alt, "bridge_token")):
+        store = alt
+token = ""
+tp = os.path.join(store, "bridge_token")
+if os.path.exists(tp):
+    token = open(tp, encoding="utf-8").read().strip()
+state = {}
+try:
+    req = urllib.request.Request("http://127.0.0.1:8090/api/status",
+                                 headers={"X-Bridge-Token": token})
+    with urllib.request.urlopen(req, timeout=2) as r:
+        state = json.loads(r.read().decode())
+except Exception:
+    state = {}
+sync = state.get("sync") or {}
+if state:
+    progress = sync.get("progress", 0)
+    print("connected:", state.get("connected"), "| paired:", state.get("paired"),
+          "| me:", state.get("mechat_jid") or "resolving…")
+    print("sync:", "ready" if sync.get("ready") else f"{progress}%",
+          "| chats:", sync.get("chats", 0), "| messages:", state.get("messages", 0))
+else:
+    print("bridge: not running")
+db = os.path.join(store, "engine.db")
+if os.path.exists(db):
+    c = sqlite3.connect(db)
+    try:
+        day = datetime.datetime.now().strftime("%Y-%m-%d")
+        pings = c.execute("SELECT delivered, created FROM daily_pings WHERE day=?", (day,)).fetchone() or (0, 0)
+        groups = c.execute("SELECT COUNT(*) FROM watch_status WHERE state='watched' AND chat_jid LIKE '%@g.us'").fetchone()[0]
+        dms = c.execute("SELECT COUNT(*) FROM watch_status WHERE state='watched' AND chat_jid NOT LIKE '%@g.us'").fetchone()[0]
+        queued = c.execute("SELECT COUNT(*) FROM outbox WHERE status='queued'").fetchone()[0]
+        retrying = c.execute("SELECT COUNT(*) FROM outbox WHERE status='held_unknown'").fetchone()[0]
+        failed = c.execute("SELECT COUNT(*) FROM outbox WHERE status='failed' AND substr(created_at,1,10)=?", (day,)).fetchone()[0]
+        spend = c.execute("SELECT usd FROM spend WHERE day=?", (day,)).fetchone()
+        print(f"pings: {pings[0]}/4 delivered ({pings[1]} created) · watching {groups} groups · {dms} DMs"
+              f" · queued {queued} · retrying {retrying} · failed today {failed}"
+              f" · spend ${(spend[0] if spend else 0):.4f}")
+        raw = c.execute("SELECT value FROM watermarks WHERE job='radar' AND key='last'").fetchone()
+        last = "—"
+        if raw:
+            try:
+                d = json.loads(raw[0])
+                at = datetime.datetime.fromisoformat(d.get("at", ""))
+                last = f"{at.strftime('%H:%M')} · {d.get('scanned', 0)} chats · {d.get('alerts', 0)} alerts"
+            except Exception:
+                last = "—"
+        now = datetime.datetime.now()
+        start = int(os.getenv("RADAR_START_HOUR", "8"))
+        end = int(os.getenv("RADAR_END_HOUR", "20"))
+        step = max(1, int(os.getenv("RADAR_EVERY_HOURS", "2")))
+        slots = list(range(start, end + 1, step))
+        nxt = next((h for h in slots if h > now.hour), slots[0] if slots else None)
+        print(f"radar: {last} · next {'%02d:00' % nxt if nxt is not None else '—'}")
+    finally:
+        c.close()
+PY
+}
+
+follow_logs() {
+  [ -f "$LOG" ] || die "no log yet at $LOG"
+  exec tail -n 200 -f "$LOG"
+}
+
+update_all() {
+  [ -x "$NEMBU_HOME/app/install.sh" ] || [ -x "$LEGACY_HOME/app/install.sh" ] || die "install.sh not found in $NEMBU_HOME/app"
+  if [ -x "$NEMBU_HOME/app/install.sh" ]; then
+    bash "$NEMBU_HOME/app/install.sh" --no-start
+  else
+    bash "$LEGACY_HOME/app/install.sh" --no-start
+  fi
+  service_stop
+  service_start
+  ok "updated"
+}
+
+uninstall_all() {
+  say "stopping Nembu…"
+  service_stop
+  rm -rf "$NEMBU_HOME/app" "$NEMBU_HOME/python"
+  rm -f "$NEMBU_HOME/bin/nembu" "$NEMBU_HOME/bin/mosaic"
+  for rc in "$HOME/.zprofile" "$HOME/.bash_profile"; do
+    [ -f "$rc" ] || continue
+    grep -vF "$NEMBU_HOME/bin" "$rc" | grep -v '^# Nembu$' | grep -v '^# Mosaic$' > "$rc.tmp" || true
+    mv "$rc.tmp" "$rc"
+  done
+  if [ -t 0 ] && [ -t 1 ]; then
+    read -r -p "Also delete store/ and .env (messages and key)? [y/N] " ans
+    if [ "${ans:-}" = "y" ] || [ "${ans:-}" = "Y" ]; then
+      rm -rf "$STORE_DIR" "$NEMBU_HOME/.env"
+    fi
+  fi
+  ok "Nembu removed"
+}
+
+MODE="${1:-run}"
+case "$MODE" in
+  start)
+    service_start; ok "started"; exit 0 ;;
+  stop)
+    service_stop; ok "stopped"; exit 0 ;;
+  restart)
+    service_stop; service_start; ok "restarted"; exit 0 ;;
+  status)
+    status; exit 0 ;;
+  logs)
+    follow_logs ;;
+  update)
+    update_all; exit 0 ;;
+  uninstall)
+    uninstall_all; exit 0 ;;
+  run|tui|"")
+    service_start
+    if [ -t 0 ] && [ -t 1 ]; then
+      exec "$BRIDGE" tui
+    else
+      warn "no terminal attached — Nembu is running in the background"
+      exit 0
+    fi
+    ;;
+  *)
+    die "unknown command: $MODE (try start, stop, status, logs, update, uninstall)"
+    ;;
+esac

@@ -1,0 +1,34 @@
+.env
+.venv/
+store/
+bin/
+cache/
+slash_cmd.log
+*.db
+*.log
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# local-only audit evidence (contains personal chat excerpts)
+docs/qa-audit-*
+docs/qa-checker-review.md
+docs/qa-audit-summary.md
+docs/superagent/asks.md
+docs/superagent/*-log.md
+
+# build artifacts
+bridge/whatsapp-client
+bridge/mosaic
+dist/
+pkg/
+
+# local dev onboarding scope marker
+.mosaic-config/
+
+# local-only audit evidence (real chat excerpts)
+docs/superagent/audit-verify.md
+
+docs/superagent/audit-verify*.md
+docs/superagent/audit-log.md
+docs/superagent/asks.md

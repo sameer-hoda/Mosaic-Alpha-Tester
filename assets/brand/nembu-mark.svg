@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 1024 1024" role="img" aria-label="Nembu mark">
+  <rect width="1024" height="1024" rx="190" fill="#2E6DB4"/>
+  <g transform="translate(512 512) rotate(-12) translate(-512 -512)">
+    <!-- outer rind -->
+    <path d="M 165 520 C 330 330 650 270 810 320 C 900 520 870 720 745 815 C 500 845 270 735 165 520 Z" fill="#F9D71C"/>
+    <!-- pith -->
+    <path d="M 225 522 C 375 370 645 320 772 360 C 842 525 815 690 712 760 C 500 780 310 680 225 522 Z" fill="#FFF4CF"/>
+    <!-- flesh -->
+    <path d="M 270 522 C 400 405 620 360 730 390 C 790 520 765 655 685 715 C 500 735 340 645 270 522 Z" fill="#F9D71C"/>
+    <!-- segments -->
+    <g stroke="#FFF4CF" stroke-width="14" stroke-linecap="round" fill="none">
+      <path d="M 330 515 L 735 405"/>
+      <path d="M 350 550 L 770 485"/>
+      <path d="M 370 585 L 775 575"/>
+      <path d="M 395 620 L 750 655"/>
+      <path d="M 430 650 L 700 710"/>
+    </g>
+  </g>
+</svg>

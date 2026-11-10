@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-darwin-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          check-latest: false
+      - name: Build bridge (arm64)
+        run: |
+          mkdir -p dist
+          cd bridge
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -ldflags "-s -w" -o ../dist/nembu-darwin-arm64 .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nembu-darwin-arm64
+          path: dist/nembu-darwin-arm64
+          if-no-files-found: error
+
+  build-darwin-amd64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          check-latest: false
+      - run: |
+          cd bridge
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -trimpath -o ../dist/nembu-darwin-amd64 .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nembu-darwin-amd64
+          path: dist/nembu-darwin-amd64
+          if-no-files-found: error
+
+  package-darwin:
+    needs: [build-darwin-arm64, build-darwin-amd64]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Combine and package
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          lipo -create dist/nembu-darwin-arm64/nembu-darwin-arm64 \
+                        dist/nembu-darwin-amd64/nembu-darwin-amd64 \
+                        -output dist/nembu
+          rm -rf pkg
+          mkdir -p pkg/bin pkg/scripts
+          cp dist/nembu pkg/bin/nembu
+          chmod +x pkg/bin/nembu
+          # legacy symlink for transition
+          ln -sf nembu pkg/bin/mosaic
+          cp ./*.py pkg/
+          cp scripts/preflight.py pkg/scripts/
+          cp VERSION pkg/
+          cp nembu pkg/launcher.sh
+          cp install.sh pkg/install.sh
+          tar -C pkg -czf "nembu-${VER}-darwin-universal.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nembu-darwin-universal
+          path: nembu-*-darwin-universal.tar.gz
+          if-no-files-found: error
+
+  build-linux-amd64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          check-latest: false
+      - name: Build bridge (linux amd64)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc
+          cd bridge
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -o ../dist/nembu-linux-amd64 .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nembu-linux-amd64
+          path: dist/nembu-linux-amd64
+          if-no-files-found: error
+
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          check-latest: false
+      - name: Build bridge (linux arm64)
+        run: |
+          cd bridge
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -trimpath -o ../dist/nembu-linux-arm64 .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nembu-linux-arm64
+          path: dist/nembu-linux-arm64
+          if-no-files-found: error
+
+  package-linux:
+    needs: [build-linux-amd64, build-linux-arm64]
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            artifact: nembu-linux-amd64
+          - arch: arm64
+            artifact: nembu-linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - name: Package
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          rm -rf pkg
+          mkdir -p pkg/bin pkg/scripts
+          cp "dist/nembu-linux-${{ matrix.arch }}" pkg/bin/nembu
+          chmod +x pkg/bin/nembu
+          ln -sf nembu pkg/bin/mosaic
+          cp ./*.py pkg/
+          cp scripts/preflight.py pkg/scripts/
+          cp VERSION pkg/
+          cp nembu pkg/launcher.sh
+          cp install.sh pkg/install.sh
+          tar -C pkg -czf "nembu-${VER}-linux-${{ matrix.arch }}.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: nembu-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [package-darwin, package-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          find assets -name 'nembu-*.tar.gz' -exec cp {} . \;
+          sha256sum nembu-*.tar.gz > checksums.txt
+          cat checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            nembu-*.tar.gz
+            checksums.txt
+          generate_release_notes: true

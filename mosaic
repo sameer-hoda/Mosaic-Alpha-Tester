@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Deprecated wrapper: `mosaic` -> `nembu`. Kept for migration.
+# This file exists to ease the rename from Mosaic to Nembu.
+# New installs should use `nembu`. This wrapper prints a deprecation
+# notice and forwards to the nembu launcher.
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$DIR/nembu" ]; then
+  echo "⚠️  'mosaic' is deprecated, use 'nembu' instead. 🍋" >&2
+  exec "$DIR/nembu" "$@"
+elif [ -x "$(dirname "$DIR")/nembu" ]; then
+  echo "⚠️  'mosaic' is deprecated, use 'nembu' instead. 🍋" >&2
+  exec "$(dirname "$DIR")/nembu" "$@"
+else
+  # fallback: try bin/nembu from home
+  if [ -x "$HOME/.nembu/bin/nembu" ]; then
+    echo "⚠️  'mosaic' is deprecated, use 'nembu' instead. 🍋" >&2
+    exec "$HOME/.nembu/bin/nembu" "$@"
+  fi
+  echo "Nembu not found, but 'mosaic' wrapper was called. Install nembu via install.sh" >&2
+  exit 1
+fi
