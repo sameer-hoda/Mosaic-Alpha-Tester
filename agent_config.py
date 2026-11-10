@@ -117,6 +117,73 @@ def include_archived() -> bool:
         return False
 
 
+EXCLUDE_FILE = "exclude.txt"
+DEFAULT_EXCLUDE_TXT = """# Chats excluded from every pipeline (Q&A, done, Radar).
+# One entry per line: an exact JID or a case-insensitive name substring.
+# Lines starting with # are ignored.
+Instinct
+"""
+
+_EXCLUDE_CACHE = {"key": None, "entries": []}
+
+
+def exclude_path() -> str:
+    return os.path.join(config_dir(), EXCLUDE_FILE)
+
+
+def _ensure_exclude_seeded() -> str:
+    path = exclude_path()
+    if os.path.exists(path):
+        return path
+    try:
+        os.makedirs(config_dir(), mode=0o700, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(DEFAULT_EXCLUDE_TXT)
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def excluded_chats() -> list:
+    """Explicit operator exclusions: NEMBU_EXCLUDE_CHATS (comma-separated),
+    then one entry per line in config/exclude.txt. Entries are exact JIDs or
+    case-insensitive name substrings. The file is read per call but cached by
+    mtime, so edits apply without a restart.
+    """
+    entries = []
+    env = os.getenv("NEMBU_EXCLUDE_CHATS") or os.getenv("MOSAIC_EXCLUDE_CHATS") or ""
+    entries.extend(x.strip() for x in env.split(",") if x.strip())
+    path = _ensure_exclude_seeded()
+    try:
+        st = os.stat(path)
+        key = (st.st_mtime_ns, st.st_size)
+        if _EXCLUDE_CACHE["key"] != key:
+            with open(path, "r", encoding="utf-8") as fh:
+                lines = [ln.split("#", 1)[0].strip() for ln in fh]
+            _EXCLUDE_CACHE["entries"] = [ln for ln in lines if ln]
+            _EXCLUDE_CACHE["key"] = key
+        entries.extend(_EXCLUDE_CACHE["entries"])
+    except OSError:
+        pass
+    return entries
+
+
+def is_excluded_chat(jid: str = "", name: str = "") -> bool:
+    """True when a chat is in the operator exclusion list."""
+    jid_l = str(jid or "").strip().lower()
+    name_l = str(name or "").strip().lower()
+    for entry in excluded_chats():
+        e = entry.lower()
+        if not e:
+            continue
+        if e == jid_l or (jid_l and e == jid_l.split(":")[0]):
+            return True
+        if "@" not in e and len(e) >= 3 and e in name_l:
+            return True
+    return False
+
+
 def persona_block() -> str:
     text = persona()
     if not text:

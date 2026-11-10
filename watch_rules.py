@@ -388,6 +388,16 @@ def compute_watch_status(use_model=False) -> dict:
     activity = chat_activity()
     contacts = contact_info()
     mentioned = mentioned_chats(7)
+    names = {}
+    con_names = _ro(MESSAGES_DB_PATH)
+    if con_names is not None:
+        try:
+            names = {r[0]: (r[1] or "") for r in
+                     con_names.execute("SELECT jid, name FROM chats").fetchall()}
+        except Exception:
+            names = {}
+        finally:
+            con_names.close()
     try:
         import mechat
 
@@ -406,6 +416,12 @@ def compute_watch_status(use_model=False) -> dict:
     try:
         for jid in sorted(set(activity) | set(overrides)):
             if not jid or jid in own_chats:
+                continue
+            chat_name = names.get(jid) or (
+                "" if _is_group(jid) else contacts.get(jid, ("", ""))[0])
+            if agent_config.is_excluded_chat(jid, chat_name):
+                excluded.append({"jid": jid, "reason": "excluded"})
+                _set_status(con, jid, "excluded", "excluded", [], now_iso)
                 continue
             ov = overrides.get(jid)
             if ov and ov["kind"] == "mute" and _in_window(ov):

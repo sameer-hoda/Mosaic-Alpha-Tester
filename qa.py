@@ -889,13 +889,14 @@ def _future_plan_chats(text, start, end, allowed=None, db_path=None):
 
 
 def _scope_excluded_jids(include_archived=None):
-    """Chats excluded from done scope: archived (unless opted in), muted, bot."""
+    """Chats excluded from done scope: archived (unless opted in), muted, bot,
+    and explicit operator exclusions."""
     if include_archived is None:
         try:
             include_archived = agent_config.include_archived()
         except Exception:
             include_archived = os.getenv("QA_INCLUDE_ARCHIVED", "0") == "1"
-    reasons = {"muted", "bot"} if include_archived else {"archived", "muted", "bot"}
+    reasons = {"muted", "bot", "excluded"} if include_archived else {"archived", "muted", "bot", "excluded"}
     try:
         elig = qa_profiles.eligibility()
     except Exception:
@@ -1696,9 +1697,16 @@ def _excluded_chat(jid):
     if jid.endswith("@newsletter") or jid == "status@broadcast":
         return True
     try:
-        return jid in set(mechat.mechat_jids())
+        if jid in set(mechat.mechat_jids()):
+            return True
+    except Exception:
+        pass
+    try:
+        if agent_config.is_excluded_chat(jid, _chat_name(jid)):
+            return True
     except Exception:
         return False
+    return False
 
 
 _NAME_CACHE = {}

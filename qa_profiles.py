@@ -147,7 +147,9 @@ def eligibility() -> dict:
     for jid, name in names.items():
         is_group = jid.endswith("@g.us")
         state, reason = status.get(jid, ("", ""))
-        if jid in archived and not agent_config.include_archived():
+        if agent_config.is_excluded_chat(jid, name):
+            out[jid] = (name, False, "excluded")
+        elif jid in archived and not agent_config.include_archived():
             out[jid] = (name, False, "archived")
         elif jid in muted:
             out[jid] = (name, False, "muted")
