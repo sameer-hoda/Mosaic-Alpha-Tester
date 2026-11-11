@@ -167,8 +167,16 @@ if [ "$FROM_SOURCE" -eq 1 ]; then
 else
   say "Finding the latest release…"
   command -v curl >/dev/null 2>&1 || die "curl is required"
-  TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+  TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
+  if [ -z "$TAG" ]; then
+    # GitHub's unauthenticated API can return 403 (rate limit). The public
+    # releases/latest redirect does not use the API, so read the tag from it.
+    say "GitHub API unavailable; reading the latest release redirect…"
+    TAG="$(curl -fsSI "https://github.com/${REPO}/releases/latest" 2>/dev/null \
+      | awk 'tolower($1) == "location:" {print $2}' \
+      | sed -n 's#.*/releases/tag/##p' | tr -d '\r' | head -1 || true)"
+  fi
   [ -n "$TAG" ] || die "No release found yet. Try again after the first release is published."
   VER="${TAG#v}"
   ASSET="nembu-${VER}-${PLATFORM}.tar.gz"
